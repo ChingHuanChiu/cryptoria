@@ -1,0 +1,3 @@
+class BinanceWebsocketException(Exception):
+
+    ...
