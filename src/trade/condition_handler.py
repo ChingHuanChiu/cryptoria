@@ -4,15 +4,12 @@ from typing import Literal
 from src.common.enum import PositionStatus, TradingDirection
 
 
-class AbstractTrade(ABC):
+class TradeConditionHandler(ABC):
 
-    def __init__(self, 
-                 trading_signal: Literal[TradingDirection.BUY, 
-                                         TradingDirection.SELL, 
-                                         TradingDirection.HOLD]) -> None:
+    def __init__(self) -> None:
 
-        self.trading_signal = trading_signal
-        self.__position_status = None
+        self.__trading_side = None
+        self.__position_status = PositionStatus["EMPTY"].value
         
     @abstractmethod
     def long_condition(self, *args, **kwargs) -> bool:
@@ -22,21 +19,18 @@ class AbstractTrade(ABC):
     def short_condition(self, *args, **kwargs) -> bool:
         NotImplementedError("Not Implemented!")
 
-    def stop_loss_condition(self, *args, **kwargs) -> bool:
+    def stop_loss_condition(self) -> bool:
         """Defalt setting is without stop loss in trading
         """
         return False
 
-    def take_profit_condition(self, *args, **kwargs) -> bool:
+    def take_profit_condition(self) -> bool:
         """Defalt setting is without take profit in trading
         """
         return False
 
     @property
     def position_status(self) -> PositionStatus:
-        
-        if self.__position_status is None:
-            raise ValueError("position stauts is in None status")
 
         return self.__position_status
 
@@ -45,30 +39,39 @@ class AbstractTrade(ABC):
 
         self.__position_status = status
 
+    
+    @property
+    def trading_side(self) -> Literal[TradingDirection.BUY, 
+                                      TradingDirection.SELL, 
+                                      TradingDirection.HOLD]:
+                
+        return self.__trading_side
 
-class LongOnlyTrade(AbstractTrade):
+    @trading_side.setter
+    def trading_side(self, side) -> None:
+        self.__trading_side = side
+        
 
-    def __init__(self, 
-                 trading_signal: Literal[TradingDirection.BUY, 
-                                         TradingDirection.SELL, 
-                                         TradingDirection.HOLD]) -> None:
+class LongOnlyTradeConditionHandler(TradeConditionHandler):
+
+    def __init__(self) -> None:
         """only for long trading(can not short the asset) and can not 
         increase position if in position.
         """
-        super().__init__(trading_signal)
+        super().__init__()
 
     def long_condition(self) -> bool:
         """long action for only in empty position and the signal is "BUY"
         """
         
-        return (self.trading_signal == TradingDirection["BUY"].value) and\
+        return (self.trading_side == TradingDirection["BUY"].value) and\
                (self.position_status == PositionStatus["EMPTY"].value)
 
     def short_condition(self) -> bool:
         """short action for only in "LONG" position and the signal is "SELL"
         """
 
-        return (self.trading_signal == TradingDirection["SELL"]) and\
+        return (self.trading_side == TradingDirection["SELL"]) and\
                (self.position_status == PositionStatus["LONG"])
 
     def stop_loss_condition(self) -> bool:

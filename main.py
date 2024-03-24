@@ -17,19 +17,14 @@ import asyncio
 from dotenv import load_dotenv
 from binance import BinanceSocketManager
 from binance.exceptions import BinanceAPIException
-from binance.enums import *
 
 
 from src.trade.strategy import AIStrategy, MockStrategy
-from src.trade.broker import AsyncTrader
-from src.api.client import get_aclient
+from src.trade.broker import AsyncBroker
+from src.trade.condition_handler import LongOnlyTradeConditionHandler, TradeConditionHandler
+from src.api.client import ClientGetter, AsyncClientGetter
 from src.api.endpoint.general import SymbolInfo
-from src.api.endpoint.orders import (
-                                        MarketOrderSender, 
-                                        AStopLossOrProfitOrder, 
-                                        AOpenOrdersGetter,
-                                        OrderCanceller
-                                    )
+
 from src.api.endpoint.account import AccountInfo
 from src.bot.message import send_message
 from src.db.engine import get_db_session
@@ -37,18 +32,24 @@ from src.db.orm import insert_data
 from src.db.table import Asset, Inference, TransactionRecord
 from src.common.monitor import WebsocketMonitor
 from src.common.exception import BinanceWebsocketException
-from src.common.enum import DirectionStatus, PositionStatus
+from src.common.enum import (
+    TradingDirection, 
+    PositionStatus,
+    OrderType,
+    TimeInForce
+)
 from src.common.data.feature import RNNFeature, TechincalFeature
 from src.common.helper import (
-                                make_inference_data_to_dict, 
-                                adjust_order_info_to_dict,
-                                make_account_info_to_list_of_dict,
-                                get_valid_quantity,
-                                get_open_position_avgprice_quant,
-                                convert_to_timestamp,
-                                initialize_data_queue,
-                                get_valid_price
-                             )
+    make_inference_data_to_dict, 
+    adjust_order_info_to_dict,
+    make_account_info_to_list_of_dict,
+    get_valid_quantity,
+    get_open_position_avgprice_quant,
+    convert_to_timestamp,
+    initialize_data_queue,
+    get_valid_price,
+    SaveOrderIDGetter
+)
 
 from src.config import (
     SYMBOL,
@@ -71,28 +72,30 @@ SYMBOL_INFO: Dict[str, Any] = SymbolInfo()(SYMBOL)
 
 #ws stream names : https://binance-docs.github.io/apidocs/spot/en/#trade-streams
 
-async def trade():
+async def start_to_trade(symbol: str,
+                         trade_condition_handler: TradeConditionHandler):
 
-    quant = get_valid_quantity(symbol=SYMBOL,
+    quant = get_valid_quantity(symbol=symbol,
                                quant=QUANT,
                                symbol_info=SYMBOL_INFO)
 
 
-    aclient = await get_aclient()
+    aclient = await AsyncClientGetter.aget(api_key=API_KEY,
+                                           api_secret=API_SECRET,
+                                           testnet=TESTNET)
+
     bm = BinanceSocketManager(aclient, user_timeout=60)
     multi_socket = bm.multiplex_socket([
-                                        f"{SYMBOL.lower()}@kline_1s", 
-                                        # f"{SYMBOL.lower()}@trade"
+                                        f"{symbol.lower()}@kline_1s", 
+                                        # f"{symbol.lower()}@trade"
                                         ])
     account_info = AccountInfo()
     
-    DATAQUEUE: List[List[Any]] = await initialize_data_queue(aclient=aclient, symbol=SYMBOL)
+    DATAQUEUE: List[List[Any]] = await initialize_data_queue(aclient=aclient, symbol=symbol)
 
-    # strategy = AIStrategy(AI_MODEL_PATH, asset=SYMBOL)
+    # strategy = AIStrategy(AI_MODEL_PATH, asset=symbol)
     strategy = MockStrategy()
-    atrader = AsyncTrader(strategy, aclient=aclient)
-
-    POSITION_STATUS = PositionStatus["EMPTY"].value
+    abroker = AsyncBroker(aclient=aclient, strategy=strategy, symbol=symbol)
 
     async with multi_socket as ms:
 
@@ -119,119 +122,86 @@ async def trade():
 
 
                     # rnn_features = RNNFeature(DATAQUEUE).make(tech_features) # shape (window sizes, feature dimension)
-                    # side = atrader.get_trading_side(x=rnn_features)
+                    # side = aabroker.get_trading_side()
                     print('策略產生中.....s')
                     # TODO: trading side is from Broker class
-                    side = atrader.get_trading_side()
+                    trading_side = abroker.get_trading_side()
+                    
+                    trade_condition_handler.trading_side = trading_side
+
                     
                     print("=======")
-                    print(f'SIDE IS : {side}')
+                    print(f'SIDE IS : {trading_side}')
                     print("=======")
-                    # place the sell order when being in position
-                    #TODO: trade condition is from Trade class
-                    if side == DirectionStatus["SELL"].value and POSITION_STATUS == PositionStatus["LONG"].value:
-                        POSITION_STATUS = PositionStatus["EMPTY"].value
-                        #TODO: from helper module:  OpenOrder class
-                        oog = AOpenOrdersGetter(aclient)
-                        open_order_list = await oog(SYMBOL)
+                    if trade_condition_handler.short_condition():
+                        save_order_id_getter = SaveOrderIDGetter(aclient=aclient, symbol=symbol)
+                        stop_loss_order_id = await save_order_id_getter.aget_stop_loss_order_id()
+                        take_profit_order_id = await save_order_id_getter.aget_take_profit_order_id()
+                        # cancel the stop loss limit order and take profit limit order 
+                        cancelled_info = abroker.place_cancel_order(order_ids=\
+                                                                    stop_loss_order_id + take_profit_order_id)
 
 
-                        # cancel the stop loss limit order and 
-                        # take profit limit order before placing the sell order
-                        if len(open_order_list) != 0: #TODO: --> remove, because before set the status of position, neet to check the order ==>  'status': 'FILLED'
-                            # TODO: from helper class::
-                            stop_loss_order_id = [order["orderId"] for order in open_order_list if order["type"] == "STOP_LOSS_LIMIT"]
-                            take_profit_order_id = [order["orderId"] for order in open_order_list if order["type"] == "TAKE_PROFIT_LIMIT"]
-                            
-                            #TODO: make cancelled list of cancelled orderid and call the Broker.place_cancel_order once! 
-                            if stop_loss_order_id:
-                                print('取消停損單')
-                                sl_cancelled_order = await atrader.place_order(OrderCanceller(aclient), 
-                                                                        **{
-                                                                            "symbol": SYMBOL, 
-                                                                            "orderId": stop_loss_order_id[0]
-                                                                            }
-                                                                        )
-                            
-                            if take_profit_order_id:
-                                print('取消停利單')
-                                tp_cancelled_order = await atrader.place_order(OrderCanceller(aclient), 
-                                                                        **{
-                                                                            "symbol": SYMBOL, 
-                                                                            "orderId": take_profit_order_id[0]
-                                                                            }
-                                                                        )
                         print(f'下賣單！！')
-                        market_order = await atrader.place_order(
-                                                                MarketOrderSender(aclient), 
-                                                                **{
-                                                                        "symbol": SYMBOL,
-                                                                        "quantity" : quant,
-                                                                        "side": side 
-                                                                    }
-                                                                )
+                        market_order = await abroker.place_short_mkt_order(quant)
+
+                        #TODO: 確認是否需要檢查有沒有下單成功 : 以order_status: "FILLDE"檢查
+                        trade_condition_handler.position_status = PositionStatus["EMPTY"].value
                         
-                    # place the limit stop loss order when the buy order is filled and not increasing positions
-                    if side == DirectionStatus["BUY"].value and POSITION_STATUS == PositionStatus["EMPTY"].value:
+                    if trade_condition_handler.long_condition():
                         
-                        # NOTICE: before set the status of position, neet to check the order ==>  'status': 'FILLED'
-                        POSITION_STATUS = PositionStatus["LONG"].value
+
                         print(f'下多單！！ .... qant is {quant}', )
-                        market_order = await atrader.place_order(
-                                                                MarketOrderSender(aclient), 
-                                                                **{
-                                                                        "symbol": SYMBOL,
-                                                                        "quantity" : quant,
-                                                                        "side": side 
-                                                                    }
-                                                                )
-                        ave_buy_price, balance_quant = await get_open_position_avgprice_quant(SYMBOL, aclient=aclient)
+                        market_order = await abroker.place_long_mkt_order(quantity=quant)
+
+                        #TODO: 確認是否需要檢查有沒有下單成功 : 以order_status: "FILLDE"檢查
+                        trade_condition_handler.position_status = PositionStatus["LONG"].value
+
+
+                        ave_buy_price, balance_quant = await get_open_position_avgprice_quant(symbol, aclient=aclient)
                         balance_quant = get_valid_quantity(
-                                            symbol=SYMBOL,
+                                            symbol=symbol,
                                             quant=balance_quant,
                                             symbol_info=SYMBOL_INFO
                                         )
 
-                        stop_loss_price = ave_buy_price * (1-STOP_LOSS_RATE)
-                        stop_loss_price: str = get_valid_price(stop_loss_price, SYMBOL_INFO)
+                        if trade_condition_handler.stop_loss_condition():
+                            stop_loss_price = ave_buy_price * (1-STOP_LOSS_RATE)
+                            stop_loss_price: str = get_valid_price(stop_loss_price, SYMBOL_INFO)
 
-                        sl_trigger_price = ave_buy_price * (1 - STOP_LOSS_TRIGGER_RATE)
-                        sl_trigger_price: str = get_valid_price(sl_trigger_price, SYMBOL_INFO)
-                        print('下停損市價單', stop_loss_price, sl_trigger_price, 'fQ: {balance_quant}') 
-                        _ = await atrader.place_order(
-                                                    AStopLossOrProfitOrder(aclient),
-                                                    **{
-                                                        "symbol": SYMBOL,
-                                                        "side": SIDE_SELL,
-                                                        "type": ORDER_TYPE_STOP_LOSS_LIMIT,
-                                                        "timeInForce": TIME_IN_FORCE_GTC,
-                                                        "quantity": balance_quant,
-                                                        "stopPrice": sl_trigger_price,# trigger price
-                                                        "price": stop_loss_price
-                                                        }
-                                                    )
-                        
-                        take_profit_price = ave_buy_price * (1+TAKE_PROFIT_RATE)
-                        take_profit_price = get_valid_price(take_profit_price, SYMBOL_INFO)
+                            sl_trigger_price = ave_buy_price * (1 - STOP_LOSS_TRIGGER_RATE)
+                            sl_trigger_price: str = get_valid_price(sl_trigger_price, SYMBOL_INFO)
 
-                        tp_trigger_price = ave_buy_price * (1+TAKE_PROFIT_TRIGGER_RATE)
-                        tp_trigger_price = get_valid_price(tp_trigger_price, SYMBOL_INFO)
-                        print('下停利市價單') 
-                        take_profit_market_order = await atrader.place_order(
 
-                                                                            AStopLossOrProfitOrder(aclient),
-                                                                            **{
-                                                                                "symbol": SYMBOL,
-                                                                                "side": SIDE_SELL,
-                                                                                "type": ORDER_TYPE_TAKE_PROFIT_LIMIT,
-                                                                                "timeInForce": TIME_IN_FORCE_GTC,
-                                                                                "quantity": balance_quant,
-                                                                                "stopPrice": tp_trigger_price,# trigger price
-                                                                                "price": take_profit_price
-                                                                                
-                                                                                }
+                            print('下停損市價單', stop_loss_price, sl_trigger_price, 'fQ: {balance_quant}') 
+                            _ = await abroker.place_stop_loss_order(
+                                                        **{
+                                                            "side": TradingDirection["SELL"].value,
+                                                            "type": OrderType["ORDER_TYPE_STOP_LOSS_LIMIT"].value,
+                                                            "timeInForce": TimeInForce["TIME_IN_FORCE_GTC"].value,
+                                                            "quantity": balance_quant,
+                                                            "stopPrice": sl_trigger_price,# trigger price
+                                                            "price": stop_loss_price
+                                                            }
+                                                        )
+                        if trade_condition_handler.take_profit_condition():
+                            # take profit order
+                            take_profit_price = ave_buy_price * (1+TAKE_PROFIT_RATE)
+                            take_profit_price = get_valid_price(take_profit_price, SYMBOL_INFO)
 
-                                                                            )
+                            tp_trigger_price = ave_buy_price * (1+TAKE_PROFIT_TRIGGER_RATE)
+                            tp_trigger_price = get_valid_price(tp_trigger_price, SYMBOL_INFO)
+                            print('下停利市價單') 
+                            _ = await abroker.place_order(
+                                                            **{
+                                                                "side": TradingDirection["SELL"].value,
+                                                                "type": OrderType["ORDER_TYPE_TAKE_PROFIT_LIMIT"].value,
+                                                                "timeInForce": TimeInForce["TIME_IN_FORCE_GTC"].value,
+                                                                "quantity": balance_quant,
+                                                                "stopPrice": tp_trigger_price,# trigger price
+                                                                "price": take_profit_price
+                                                                }
+                                                            )
 
                     if market_order is not None:
                         insert_data(session=sess,
@@ -239,10 +209,9 @@ async def trade():
                                     list_dict_data=[adjust_order_info_to_dict(market_order)])
                         
                     inference_data = make_inference_data_to_dict(timestamp=event_time,
-                                                        symbol=SYMBOL,
-                                                        prediction=str(atrader.trading_signal),
-                                                        model_version="0.0"
-                                                        )
+                                                                symbol=symbol,
+                                                                prediction=str(trading_side),
+                                                                model_version="0.0")
                     insert_data(session=sess,
                                 table=Inference,
                                 list_dict_data=[inference_data])

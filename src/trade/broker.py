@@ -114,6 +114,6 @@ class AsyncBroker:
                                                     TradingDirection.SELL, 
                                                     TradingDirection.HOLD]:
 
-        trading_signal = self.strategy.get_signal(**kwargs)
-        side = self.SIDE_MAPPING[trading_signal]
+        self.trading_signal = self.strategy.get_signal(**kwargs)
+        side = self.SIDE_MAPPING[self.trading_signal]
         return side

@@ -4,7 +4,7 @@ from datetime import datetime
 
 from binance.helpers import round_step_size
 from binance.enums import KLINE_INTERVAL_15MINUTE
-from binance.client import Client
+from binance.client import AsyncClient
 import pandas as pd
 
 from src.api.endpoint.market_data import LatestSymbolPrice, AsyncKline
@@ -17,7 +17,7 @@ from src.common.order_filter import (
 )
 from src.common.data.feature import TechincalFeature
 from src.config import FEATURE_COLUMNS
-from src.api.endpoint.orders import OpenOrdersGetter
+from src.api.endpoint.orders import AOpenOrdersGetter
 
 
 def convert_to_timestamp(timestamp_milliseconds: int) -> datetime:
@@ -155,28 +155,31 @@ async def initialize_data_queue(aclient, symbol) -> List[List[Any]]:
         return res_df[FEATURE_COLUMNS].values.tolist()
 
 
-class OpenOrder:
+class SaveOrderIDGetter:
 
-    def __init__(self, client: Client, symbol: str) -> None:
-        self.client = client
+    def __init__(self, aclient: AsyncClient, symbol: str) -> None:
+
+        self.aclient = aclient
         self.symbol = symbol
+        self.open_order_list = None
 
-        self.open_order_list = self._get_open_order_list()
+    async def _aget_open_order_list(self):
+        if self.open_order_list is None:
+            aoog = AOpenOrdersGetter(self.aclient)
+            self.open_order_list = await aoog(self.symbol)
+        return  self.open_order_list
 
-    def _get_open_order_list(self):
+    async def aget_stop_loss_order_id(self) -> List[str]:
+        open_order_list = await self._aget_open_order_list()
 
-        oog = OpenOrdersGetter(self.client)
-        return oog(self.symbol)
-
-    def get_stop_loss_order_id(self) -> List[str]:
-
-        stop_loss_order_id = [str(order["orderId"]) for order in self.open_order_list \
+        stop_loss_order_id = [str(order["orderId"]) for order in open_order_list \
                                                     if order["type"] == "STOP_LOSS_LIMIT"]
         return stop_loss_order_id
 
-    def get_take_profit_order_id(self) -> List[str]:
-
-        take_profit_order_id = [order["orderId"] for order in self.open_order_list \
+    async def aget_take_profit_order_id(self) -> List[str]:
+        
+        open_order_list = await self._aget_open_order_list()
+        take_profit_order_id = [order["orderId"] for order in open_order_list \
                                                 if order["type"] == "TAKE_PROFIT_LIMIT"]
 
         return take_profit_order_id
