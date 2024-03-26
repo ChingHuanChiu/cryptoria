@@ -1,9 +1,5 @@
 """
-      
-#TODO:
-# 2. 限制交易次數
-# 3. error : 沒有刪除停損單雨停利單
-# 4. restruct main function (after the system is running without bug)
+
 # https://www.binance.com/zh-TC/support/faq/%E5%A6%82%E4%BD%95%E5%9C%A8%E5%B9%A3%E5%AE%89%E6%B8%AC%E8%A9%A6%E7%B6%B2%E4%B8%8A%E6%B8%AC%E8%A9%A6%E6%88%91%E7%9A%84%E5%8A%9F%E8%83%BD-ab78f9a1b8824cf0a106b4229c76496d 
 
 
@@ -19,7 +15,7 @@ from binance import BinanceSocketManager
 from binance.exceptions import BinanceAPIException
 
 
-from src.trade.strategy import AIStrategy, MockStrategy
+from src.trade.strategy import AIStrategy, MockStrategy, StrategyBase
 from src.trade.broker import AsyncBroker
 from src.trade.condition_handler import LongOnlyTradeConditionHandler, TradeConditionHandler
 from src.api.client import ClientGetter, AsyncClientGetter
@@ -73,7 +69,8 @@ SYMBOL_INFO: Dict[str, Any] = SymbolInfo()(SYMBOL)
 #ws stream names : https://binance-docs.github.io/apidocs/spot/en/#trade-streams
 
 async def start_to_trade(symbol: str,
-                         trade_condition_handler: TradeConditionHandler):
+                         trade_condition_handler: TradeConditionHandler,
+                         strategy: StrategyBase):
 
     quant = get_valid_quantity(symbol=symbol,
                                quant=QUANT,
@@ -85,23 +82,18 @@ async def start_to_trade(symbol: str,
                                            testnet=TESTNET)
 
     bm = BinanceSocketManager(aclient, user_timeout=60)
-    multi_socket = bm.multiplex_socket([
-                                        f"{symbol.lower()}@kline_1s", 
-                                        # f"{symbol.lower()}@trade"
-                                        ])
+    multi_socket = bm.multiplex_socket([f"{symbol.lower()}@kline_5s"])
+
     account_info = AccountInfo()
     
     DATAQUEUE: List[List[Any]] = await initialize_data_queue(aclient=aclient, symbol=symbol)
 
-    # strategy = AIStrategy(AI_MODEL_PATH, asset=symbol)
-    strategy = MockStrategy()
     abroker = AsyncBroker(aclient=aclient, strategy=strategy, symbol=symbol)
 
     async with multi_socket as ms:
-
         with get_db_session() as sess:
-            
             while True:
+
                 market_order = None
                 try:
                     print('Trading STARTING....')
@@ -124,12 +116,10 @@ async def start_to_trade(symbol: str,
                     # rnn_features = RNNFeature(DATAQUEUE).make(tech_features) # shape (window sizes, feature dimension)
                     # side = aabroker.get_trading_side()
                     print('策略產生中.....s')
-                    # TODO: trading side is from Broker class
-                    trading_side = abroker.get_trading_side()
+                    trading_side = abroker.get_trading_side(kwargs=None)
                     
                     trade_condition_handler.trading_side = trading_side
 
-                    
                     print("=======")
                     print(f'SIDE IS : {trading_side}')
                     print("=======")
@@ -137,10 +127,8 @@ async def start_to_trade(symbol: str,
                         save_order_id_getter = SaveOrderIDGetter(aclient=aclient, symbol=symbol)
                         stop_loss_order_id = await save_order_id_getter.aget_stop_loss_order_id()
                         take_profit_order_id = await save_order_id_getter.aget_take_profit_order_id()
-                        # cancel the stop loss limit order and take profit limit order 
-                        cancelled_info = abroker.place_cancel_order(order_ids=\
-                                                                    stop_loss_order_id + take_profit_order_id)
-
+                        canceled_ordier_id = stop_loss_order_id + take_profit_order_id
+                        cancelled_info = abroker.place_cancel_order(order_ids=canceled_ordier_id)
 
                         print(f'下賣單！！')
                         market_order = await abroker.place_short_mkt_order(quant)
@@ -150,14 +138,13 @@ async def start_to_trade(symbol: str,
                         
                     if trade_condition_handler.long_condition():
                         
-
                         print(f'下多單！！ .... qant is {quant}', )
                         market_order = await abroker.place_long_mkt_order(quantity=quant)
 
                         #TODO: 確認是否需要檢查有沒有下單成功 : 以order_status: "FILLDE"檢查
                         trade_condition_handler.position_status = PositionStatus["LONG"].value
 
-
+                        #TODO: balance quant ACCOUNT 拿
                         ave_buy_price, balance_quant = await get_open_position_avgprice_quant(symbol, aclient=aclient)
                         balance_quant = get_valid_quantity(
                                             symbol=symbol,
@@ -171,7 +158,6 @@ async def start_to_trade(symbol: str,
 
                             sl_trigger_price = ave_buy_price * (1 - STOP_LOSS_TRIGGER_RATE)
                             sl_trigger_price: str = get_valid_price(sl_trigger_price, SYMBOL_INFO)
-
 
                             print('下停損市價單', stop_loss_price, sl_trigger_price, 'fQ: {balance_quant}') 
                             _ = await abroker.place_stop_loss_order(
@@ -257,6 +243,9 @@ async def start_to_trade(symbol: str,
 
 
 async def main():
+    # strategy = AIStrategy(AI_MODEL_PATH, asset=symbol)
+    strategy = MockStrategy()
+    trade_condition_handler = LongOnlyTradeConditionHandler()
     tasks = [trade()]
     _ = await asyncio.gather(*tasks)
 

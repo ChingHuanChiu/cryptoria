@@ -32,16 +32,13 @@ class AIStrategy(StrategyBase):
         1. without further position averaging
         2. without short selling
         """
-
-        balance_info = AssetBalance(asset=self.asset)
         signal = self.model(**kwargs)
 
-        if balance_info is not None:
-            if self.is_buy(signal):
-                return "0"
-            
-            return signal
-
+       
+        if self.is_buy(signal):
+            return "1"
+        elif self.is_sell:
+            return "-1"
         else:
             return "0"
          

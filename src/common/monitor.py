@@ -24,7 +24,6 @@ class AMonitorBase(metaclass=ABCMeta):
         pass
 
 
-
 class AccountMonitor(MonitorBase):
 
     def notify(self) -> None:
@@ -50,7 +49,6 @@ class SystemMonitor(MonitorBase):
 
 
 class WebsocketMonitor(AMonitorBase):
-
 
     async def anotify(self, msg, ws):
         
