@@ -1,5 +1,9 @@
 """
-
+TODO:
+1. redesign SQL table 
+2. 成交要通知line
+3. check the helper function
+4. dash to make dashboard  
 # https://www.binance.com/zh-TC/support/faq/%E5%A6%82%E4%BD%95%E5%9C%A8%E5%B9%A3%E5%AE%89%E6%B8%AC%E8%A9%A6%E7%B6%B2%E4%B8%8A%E6%B8%AC%E8%A9%A6%E6%88%91%E7%9A%84%E5%8A%9F%E8%83%BD-ab78f9a1b8824cf0a106b4229c76496d 
 
 
@@ -133,7 +137,6 @@ async def start_to_trade(symbol: str,
                         print(f'下賣單！！')
                         market_order = await abroker.place_short_mkt_order(quant)
 
-                        #TODO: 確認是否需要檢查有沒有下單成功 : 以order_status: "FILLDE"檢查
                         trade_condition_handler.position_status = PositionStatus["EMPTY"].value
                         
                     if trade_condition_handler.long_condition():
@@ -141,10 +144,8 @@ async def start_to_trade(symbol: str,
                         print(f'下多單！！ .... qant is {quant}', )
                         market_order = await abroker.place_long_mkt_order(quantity=quant)
 
-                        #TODO: 確認是否需要檢查有沒有下單成功 : 以order_status: "FILLDE"檢查
                         trade_condition_handler.position_status = PositionStatus["LONG"].value
 
-                        #TODO: balance quant ACCOUNT 拿
                         ave_buy_price, balance_quant = await get_open_position_avgprice_quant(symbol, aclient=aclient)
                         balance_quant = get_valid_quantity(
                                             symbol=symbol,
@@ -188,7 +189,7 @@ async def start_to_trade(symbol: str,
                                                                 "price": take_profit_price
                                                                 }
                                                             )
-
+                    #把market order is None 條件拿掉  不管失敗成功都要記錄
                     if market_order is not None:
                         insert_data(session=sess,
                                     table=TransactionRecord,

@@ -53,11 +53,12 @@ class TradeConditionHandler(ABC):
         
 
 class LongOnlyTradeConditionHandler(TradeConditionHandler):
+    """Only for long trading(can not short the asset) and can not 
+    increase position if in position.
+    """
 
     def __init__(self) -> None:
-        """only for long trading(can not short the asset) and can not 
-        increase position if in position.
-        """
+
         super().__init__()
 
     def long_condition(self) -> bool:
