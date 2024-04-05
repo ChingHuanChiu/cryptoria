@@ -1,7 +1,7 @@
 """
 TODO:
 1. redesign SQL table (轉mysql)
-2. 成交要通知line
+2. 成交要通知line  VVVVV
 4. dash to make dashboard  
 # https://www.binance.com/zh-TC/support/faq/%E5%A6%82%E4%BD%95%E5%9C%A8%E5%B9%A3%E5%AE%89%E6%B8%AC%E8%A9%A6%E7%B6%B2%E4%B8%8A%E6%B8%AC%E8%A9%A6%E6%88%91%E7%9A%84%E5%8A%9F%E8%83%BD-ab78f9a1b8824cf0a106b4229c76496d 
 
@@ -41,7 +41,7 @@ from src.common.helper import (
     make_inference_data_to_dict, 
     adjust_order_info_to_dict,
     make_account_info_to_list_of_dict,
-    get_open_position_avgprice_quant,
+    get_open_position_avgprice,
     convert_to_timestamp,
     initialize_data_queue,
     SaveOrderIDGetter
@@ -137,8 +137,7 @@ async def start_to_trade(symbol: str,
 
                         trade_condition_handler.position_status = PositionStatus["LONG"].value
 
-                        ave_buy_price, balance_quant = await get_open_position_avgprice_quant(symbol, aclient=aclient)
-                        balance_quant = lotsize_validator.get_valid_value(None, None, quantity=balance_quant)
+                        ave_buy_price = await get_open_position_avgprice(symbol, aclient=aclient)
 
                         if trade_condition_handler.stop_loss_condition():
                             stop_loss_price = ave_buy_price * (1-STOP_LOSS_RATE)
@@ -147,13 +146,13 @@ async def start_to_trade(symbol: str,
                             sl_trigger_price = ave_buy_price * (1 - STOP_LOSS_TRIGGER_RATE)
                             sl_trigger_price = price_validator.get_valid_value(sl_trigger_price)
 
-                            print('下停損市價單', stop_loss_price, sl_trigger_price, f'fQ: {balance_quant}') 
+                            print('下停損市價單', stop_loss_price, sl_trigger_price, f'fQ: {quant}') 
                             _ = await abroker.place_stop_loss_order(
                                                         **{
                                                             "side": TradingDirection["SELL"].value,
                                                             "type": OrderType["ORDER_TYPE_STOP_LOSS_LIMIT"].value,
                                                             "time_in_force": TimeInForce["TIME_IN_FORCE_GTC"].value,
-                                                            "quantity": balance_quant,
+                                                            "quantity": quant,
                                                             "trigger_price": sl_trigger_price,# trigger price
                                                             "price": stop_loss_price
                                                             }
@@ -171,7 +170,7 @@ async def start_to_trade(symbol: str,
                                                                 "side": TradingDirection["SELL"].value,
                                                                 "type": OrderType["ORDER_TYPE_TAKE_PROFIT_LIMIT"].value,
                                                                 "time_in_force": TimeInForce["TIME_IN_FORCE_GTC"].value,
-                                                                "quantity": balance_quant,
+                                                                "quantity": quant,
                                                                 "trigger_price": tp_trigger_price,# trigger price
                                                                 "price": take_profit_price
                                                                 }
@@ -182,7 +181,7 @@ async def start_to_trade(symbol: str,
                         stop_loss_order_id = await save_order_id_getter.aget_stop_loss_order_id()
                         take_profit_order_id = await save_order_id_getter.aget_take_profit_order_id()
                         canceled_ordier_id = stop_loss_order_id + take_profit_order_id
-                        cancelled_info = abroker.place_cancel_order(order_ids=canceled_ordier_id)
+                        cancelled_info = await abroker.place_cancel_order(order_ids=canceled_ordier_id)
 
                         print(f'下賣單！！ Q:{quant}')
                         market_order = await abroker.place_short_mkt_order(quant)

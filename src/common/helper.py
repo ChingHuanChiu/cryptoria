@@ -68,8 +68,8 @@ def make_account_info_to_list_of_dict(account_info) -> List[Dict[str, Any]]:
     return list_of_dict
 
 
-async def get_open_position_avgprice_quant(symbol: str, aclient):
-    """Get the average price and total quantities of your trading history
+async def get_open_position_avgprice(symbol: str, aclient):
+    """Get the average price  of open position.
     """
     
     total_quantity = 0.0
@@ -84,7 +84,7 @@ async def get_open_position_avgprice_quant(symbol: str, aclient):
 
     average_price = total_cost / total_quantity
 
-    return average_price, total_quantity
+    return average_price
 
 
 async def initialize_data_queue(aclient, symbol) -> List[List[Any]]:
