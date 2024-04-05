@@ -7,14 +7,8 @@ from binance.enums import KLINE_INTERVAL_15MINUTE
 from binance.client import AsyncClient
 import pandas as pd
 
-from src.api.endpoint.market_data import LatestSymbolPrice, AsyncKline
+from src.api.endpoint.market_data import AsyncKline
 from src.api.endpoint.account import ATradesGetter
-
-from src.common.order_filter import (
-    MinNotionalFilter,
-    LotSizeFilter,
-    PriceFilter
-)
 from src.common.data.feature import TechincalFeature
 from src.config import FEATURE_COLUMNS
 from src.api.endpoint.orders import AOpenOrdersGetter
@@ -73,50 +67,9 @@ def make_account_info_to_list_of_dict(account_info) -> List[Dict[str, Any]]:
     list_of_dict = tmp_df.to_dict(orient='records')
     return list_of_dict
 
-    
-def get_valid_quantity(symbol_info: Dict[str, Any],
-                       symbol: str,
-                       quant: float
-                       ):
-
-    lsf = LotSizeFilter(symbol_info)
-    mnf = MinNotionalFilter(symbol_info)
-
-    current_price = LatestSymbolPrice()(symbol)['price']
-    
-    step_size = lsf.get_step_size
-
-    if mnf.is_apply_min_to_market:
-        notional = quant * float(current_price)
-        print("66666", {"min_notional": mnf.min_notional, "notional": notional, "Q":quant, "adj_Q": mnf.min_notional / float(current_price), "curr_price":float(current_price)})
-        if not mnf.pass_filter(notional):
-            adj_quant = mnf.min_notional / float(current_price)
-            # TODO: after the adjust quantity, it still get 'Filter failure: NOTIONAL',
-            #so add the 'step size' to prevent the occurrence of error temporary, 
-            #need to find out the better way
-            adj_quant += step_size
-        else:
-            adj_quant = quant
-    
-    
-    if lsf.pass_filter(adj_quant):
-
-        valid_quant = adj_quant if step_size == 0 else round_step_size(adj_quant, step_size)
-        return valid_quant
-
-
-def get_valid_price(price: float, symbol_info) -> str:
-    pf = PriceFilter(symbol_info)
-    tick_size = pf.get_tick_size
-    quote_precision = symbol_info['quoteAssetPrecision']
-
-    valid_price = round_step_size(price, tick_size)
-
-    return "{:0.0{}f}".format(valid_price, quote_precision)
-
 
 async def get_open_position_avgprice_quant(symbol: str, aclient):
-    """get the average price and total quantities of your trading history
+    """Get the average price and total quantities of your trading history
     """
     
     total_quantity = 0.0

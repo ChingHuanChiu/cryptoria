@@ -19,13 +19,24 @@ class TradeConditionHandler(ABC):
     def short_condition(self, *args, **kwargs) -> bool:
         NotImplementedError("Not Implemented!")
 
+    @abstractmethod
     def stop_loss_condition(self) -> bool:
-        """Defalt setting is without stop loss in trading
+
+        """
+        Check if the stop loss condition for trading is met.
+
+        Returns:
+            bool: True if the stop loss condition is met, False otherwise.
         """
         return False
 
+    @abstractmethod
     def take_profit_condition(self) -> bool:
-        """Defalt setting is without take profit in trading
+        """
+        Check if the take profit condition for trading is met.
+
+        Returns:
+            bool: True if the take profit condition is met, False otherwise.
         """
         return False
 
@@ -53,8 +64,8 @@ class TradeConditionHandler(ABC):
         
 
 class LongOnlyTradeConditionHandler(TradeConditionHandler):
-    """Only for long trading(can not short the asset) and can not 
-    increase position if in position.
+    """Only for long trading (cannot short the asset) and 
+    cannot increase position if already in position.
     """
 
     def __init__(self) -> None:
@@ -62,20 +73,30 @@ class LongOnlyTradeConditionHandler(TradeConditionHandler):
         super().__init__()
 
     def long_condition(self) -> bool:
-        """long action for only in empty position and the signal is "BUY"
+        """
+        Check if the long action is permissible, 
+        only when the position is empty and the signal is "BUY".
+
+        Returns:
+            bool: True if the long condition is met, False otherwise.
         """
         
         return (self.trading_side == TradingDirection["BUY"].value) and\
                (self.position_status == PositionStatus["EMPTY"].value)
 
     def short_condition(self) -> bool:
-        """short action for only in "LONG" position and the signal is "SELL"
         """
+        Check if the short action is permissible, only when the position is "LONG" and the signal is "SELL".
 
-        return (self.trading_side == TradingDirection["SELL"]) and\
-               (self.position_status == PositionStatus["LONG"])
+        Returns:
+            bool: True if the short condition is met, False otherwise.
+        """
+        return (self.trading_side == TradingDirection["SELL"].value) and\
+               (self.position_status == PositionStatus["LONG"].value)
 
     def stop_loss_condition(self) -> bool:
-        """must with stop loss in the trading
-        """
+
         return True
+
+    def take_profit_condition(self) -> bool:
+        return False

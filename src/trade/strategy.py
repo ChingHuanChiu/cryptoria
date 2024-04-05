@@ -53,7 +53,7 @@ class MockStrategy(StrategyBase):
 
     def get_signal(self, **kwargs) -> str:
 
-        signal = random.choice(["0", "1", "-1"])
+        signal = random.choice([ "1", "-1"])
         return signal
 
         

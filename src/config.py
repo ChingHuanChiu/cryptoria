@@ -52,7 +52,8 @@ TIMESERIES_WINDOWS_SIZE = 10
 
 # trading setting
 SYMBOL = "BTCUSDT"
-QUANT = 0.00001
+# The ratio of available equity(USDT) balance to trade 
+EQUITY_RATIO_TO_TRADE = 0.05
 STOP_LOSS_RATE = 0.1
 STOP_LOSS_TRIGGER_RATE = 0.08
 TAKE_PROFIT_RATE = 0.2

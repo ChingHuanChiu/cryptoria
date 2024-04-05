@@ -88,7 +88,7 @@ class HistoricalKlineGenerator(MarketDataBase):
 
 class LatestSymbolPrice(MarketDataBase):
 
-    def __init__(self, client: Client) -> None:
+    def __init__(self, client: AsyncClient) -> None:
         super().__init__(client)
 
     def __call__(self, symbol):
