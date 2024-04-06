@@ -71,16 +71,3 @@ class TechincalFeature(FeatureBase):
         )
         df.ta.cores = 4
         df.ta.strategy(AllStrategy)
-
-
-
-
-
-
-    
-
-
-
-
-
-

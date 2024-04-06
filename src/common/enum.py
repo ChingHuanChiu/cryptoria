@@ -1,4 +1,6 @@
 from enum import Enum, unique
+from dataclasses import dataclass
+
 
 @unique
 class SystemMessageEnum(Enum):
@@ -74,3 +76,25 @@ class HistoricalKlinesType(Enum):
     SPOT = 1
     FUTURES = 2
     FUTURES_COIN = 3
+
+
+@dataclass
+class TradeMessage:
+
+    symbol: str
+    action: str
+    quant: str
+    asset_balance: str
+    pos_status: str
+
+    def receive(self):
+
+        msg = f"""
+                交易標的: {self.symbol}\n
+                交易行為: {self.action}\n
+                交易單位: {self.quant}\n
+                資產餘額: {self.asset_balance}\n
+                部位狀況: {self.pos_status}
+                """
+        return msg
+

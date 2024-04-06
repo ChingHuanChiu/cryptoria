@@ -22,7 +22,14 @@ def convert_to_timestamp(timestamp_milliseconds: int) -> datetime:
 
 
 def adjust_order_info_to_dict(order: Dict[str, Any]):
-    """adjust the order infomation to match the schema of the sql table 
+    """Adjust the order information to match the schema of the SQL table.
+
+    Args:
+        order (Dict[str, Any]): The order information.
+
+    Returns:
+        Dict[str, Any]: The adjusted order information.
+    
     """
     del order["clientOrderId"]
     del order["orderId"]

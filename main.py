@@ -1,12 +1,12 @@
 """
 TODO:
-1. redesign SQL table (轉mysql)
-2. 成交要通知line  VVVVV
+1. redesign SQL table 
 4. dash to make dashboard  
 # https://www.binance.com/zh-TC/support/faq/%E5%A6%82%E4%BD%95%E5%9C%A8%E5%B9%A3%E5%AE%89%E6%B8%AC%E8%A9%A6%E7%B6%B2%E4%B8%8A%E6%B8%AC%E8%A9%A6%E6%88%91%E7%9A%84%E5%8A%9F%E8%83%BD-ab78f9a1b8824cf0a106b4229c76496d 
 
 
 """
+from multiprocessing.connection import Client
 import os
 import time
 from typing import Dict, Any, List
@@ -34,7 +34,8 @@ from src.common.enum import (
     TradingDirection, 
     PositionStatus,
     OrderType,
-    TimeInForce
+    TimeInForce,
+    TradeMessage
 )
 from src.common.data.feature import RNNFeature, TechincalFeature
 from src.common.helper import (
@@ -90,6 +91,8 @@ async def start_to_trade(symbol: str,
     lotsize_validator = LotSize(symbol_info)
     price_validator = Price(symbol_info)
 
+    asset_balance = AssetBalance(client)
+
     async with multi_socket as ms:
         with get_db_session() as sess:
             while True:
@@ -123,19 +126,23 @@ async def start_to_trade(symbol: str,
                     print("=======")
                     print(f'SIDE IS : {trading_side}')
                     print("=======")
-                    print(1, trade_condition_handler.position_status)
                     if trade_condition_handler.long_condition():
                         
                         curr_mkt_price = LatestSymbolPrice(client)(symbol)["price"]
-                        usdt_asset = AssetBalance(client)(asset="USDT")["free"]
-                        balance_equity = float(usdt_asset) * EQUITY_RATIO_TO_TRADE
-                        print(f"USDT remain{usdt_asset}, trade balance {balance_equity}")
-                        quant = lotsize_validator.get_valid_value(balance_equity, curr_mkt_price)
+                        usdt_asset = asset_balance(asset="USDT")["free"]
+                        equity_to_trade = float(usdt_asset) * EQUITY_RATIO_TO_TRADE
+                        print(f"USDT remain{usdt_asset}, trade balance {equity_to_trade}")
+                        quant = lotsize_validator.get_valid_value(equity_to_trade, curr_mkt_price)
                         
                         print(f'下多單！！ .... 買入 {quant}', )
                         market_order = await abroker.place_long_mkt_order(quantity=quant)
 
                         trade_condition_handler.position_status = PositionStatus["LONG"].value
+                        send_message(TradeMessage(symbol, 
+                                                  "BUY", 
+                                                  quant, 
+                                                  asset_balance(asset="USDT")["free"], 
+                                                  trade_condition_handler.position_status).receive())
 
                         ave_buy_price = await get_open_position_avgprice(symbol, aclient=aclient)
 
@@ -157,6 +164,12 @@ async def start_to_trade(symbol: str,
                                                             "price": stop_loss_price
                                                             }
                                                         )
+                            send_message(TradeMessage(symbol, 
+                                                      "停損", 
+                                                      quant, 
+                                                      asset_balance(asset="USDT")["free"], 
+                                                      trade_condition_handler.position_status).receive())
+
                         if trade_condition_handler.take_profit_condition():
                             # take profit order
                             take_profit_price = ave_buy_price * (1+TAKE_PROFIT_RATE)
@@ -175,6 +188,12 @@ async def start_to_trade(symbol: str,
                                                                 "price": take_profit_price
                                                                 }
                                                             )
+                            send_message(TradeMessage(symbol, 
+                                                      "停利", 
+                                                      quant, 
+                                                      asset_balance(asset="USDT")["free"],
+                                                      trade_condition_handler.position_status).receive())
+
                     if trade_condition_handler.short_condition():
 
                         save_order_id_getter = SaveOrderIDGetter(aclient=aclient, symbol=symbol)
@@ -187,6 +206,12 @@ async def start_to_trade(symbol: str,
                         market_order = await abroker.place_short_mkt_order(quant)
 
                         trade_condition_handler.position_status = PositionStatus["EMPTY"].value
+                        send_message(TradeMessage(symbol, 
+                                                  "賣出", 
+                                                  quant, 
+                                                  asset_balance(asset="USDT")["free"],
+                                                  trade_condition_handler.position_status).receive())
+
                     #TODO: 把market order is None 條件拿掉  不管失敗成功都要記錄
                     # if market_order is not None:
                     #     insert_data(session=sess,
@@ -206,7 +231,7 @@ async def start_to_trade(symbol: str,
                     #     table=Asset,
                     #     list_dict_data=make_account_info_to_list_of_dict(account_info()))
                     print('休息')
-                    time.sleep(15)
+                    time.sleep(10)
 
                 except BinanceWebsocketException:
 
