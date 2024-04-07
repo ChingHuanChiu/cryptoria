@@ -265,7 +265,7 @@ class AStopLossOrderSender(AsyncOrderBase):
                 "cummulativeQuoteQty": "10.00000000",
                 "status": "FILLED",
                 "timeInForce": "GTC",
-                "type": "MARKET",
+                "type": "STOP_LOSS_LIMIT",
                 "side": "SELL"
             }
           """

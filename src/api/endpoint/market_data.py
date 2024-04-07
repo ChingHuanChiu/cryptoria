@@ -91,9 +91,20 @@ class LatestSymbolPrice(MarketDataBase):
     def __init__(self, client: AsyncClient) -> None:
         super().__init__(client)
 
-    def __call__(self, symbol):
+    def __call__(self, symbol) -> str:
+        """
+        Returns:
+            the api response is the following outcome:
+            {
+                "symbol": "LTCBTC",
+                "price": "4.00000200"
+            }
+            We only retutn the key of "prcie":
+                "4.00000200"
 
-        return self.client.get_symbol_ticker(symbol=symbol)
+        """
+
+        return self.client.get_symbol_ticker(symbol=symbol)["price"]
     
 
 class AsyncMarketDepth(AsyncMarketDataBase):

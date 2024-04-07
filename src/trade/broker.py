@@ -1,4 +1,4 @@
-from typing import Literal, Dict, Any, List
+from typing import Literal, Dict, Any, List, Optional
 
 from binance.enums import *
 from binance.client import AsyncClient
@@ -93,13 +93,13 @@ class AsyncBroker:
                                                         })
             return tp_order
 
-    async def place_cancel_order(self, order_ids: List[str]) -> Dict[str, Any]:
-        
-        for order_id in order_ids:
-            cancelled_info = await self._handle_order(AOrderCanceller(self.aclient),
-                                                    symbol=self.symbol,
-                                                    orderId=order_id)
-        return cancelled_info
+    async def place_cancel_order(self, order_ids: List[str]) -> Optional[Dict[str, Any]]:
+        if order_ids:
+            for order_id in order_ids:
+                cancelled_info = await self._handle_order(AOrderCanceller(self.aclient),
+                                                        symbol=self.symbol,
+                                                        orderId=order_id)
+            return cancelled_info
     
     async def _handle_order(self, 
                            api_order: AsyncOrderBase, 

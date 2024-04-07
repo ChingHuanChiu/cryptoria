@@ -54,14 +54,17 @@ class AssetBalance(AccountBase):
     def __init__(self, client: Client):
         self.client = client
 
-    def __call__(self, asset: str) -> Dict[str, Any]:
-        """get the asset balance
+    def __call__(self, asset: str) -> str:
+        """Get the asset balance
         Returns:
-            Examples::
-            {'asset': 'DOGE', 'free': 'XXXXX', 'locked': '0.00000000'}
+
+            The API response is the following outcome:
+                {'asset': 'DOGE', 'free': 'XXXXX', 'locked': '0.00000000'}
+            And we return the key of "free":
+                'XXXXX' 
         """
 
-        return self.client.get_asset_balance(asset=asset)
+        return self.client.get_asset_balance(asset=asset)["free"]
     
 
 class AccountStatus(AccountBase):

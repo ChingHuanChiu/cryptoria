@@ -52,6 +52,7 @@ TIMESERIES_WINDOWS_SIZE = 10
 
 # trading setting
 SYMBOL = "BTCUSDT"
+ASSET = "BTC"
 # The ratio of available equity(USDT) balance to trade 
 EQUITY_RATIO_TO_TRADE = 0.05
 STOP_LOSS_RATE = 0.1

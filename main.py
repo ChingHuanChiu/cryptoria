@@ -6,7 +6,6 @@ TODO:
 
 
 """
-from multiprocessing.connection import Client
 import os
 import time
 from typing import Dict, Any, List
@@ -19,7 +18,7 @@ from binance.exceptions import BinanceAPIException
 from src.trade.strategy import AIStrategy, MockStrategy, StrategyBase
 from src.trade.broker import AsyncBroker
 from src.trade.condition_handler import LongOnlyTradeConditionHandler, TradeConditionHandler
-from src.trade.validate.validator import Price, LotSize, MinNotional
+from src.trade.validate.validator import Price, LotSize
 from src.api.client import ClientGetter, AsyncClientGetter
 from src.api.endpoint.general import SymbolInfo
 from src.api.endpoint.account import AccountInfo, AssetBalance
@@ -55,7 +54,8 @@ from src.config import (
     STOP_LOSS_TRIGGER_RATE,
     TAKE_PROFIT_RATE,
     TAKE_PROFIT_TRIGGER_RATE,
-    AI_MODEL_PATH
+    AI_MODEL_PATH,
+    ASSET
 )
 
 load_dotenv()
@@ -80,18 +80,20 @@ async def start_to_trade(symbol: str,
 
     DATAQUEUE: List[List[Any]] = await initialize_data_queue(aclient=aclient, symbol=symbol)
 
-    bm = BinanceSocketManager(aclient, user_timeout=60)
-    multi_socket = bm.multiplex_socket([f"{symbol.lower()}@kline_1s"])
-
-    account_info = AccountInfo(client)
-
     abroker = AsyncBroker(aclient=aclient, strategy=strategy, symbol=symbol)
     
     symbol_info = SymbolInfo(client)(symbol)
+
     lotsize_validator = LotSize(symbol_info)
     price_validator = Price(symbol_info)
 
+    account_info = AccountInfo(client)
     asset_balance = AssetBalance(client)
+
+    trade_condition_handler.asset_balance_obj = asset_balance
+
+    bm = BinanceSocketManager(aclient, user_timeout=60)
+    multi_socket = bm.multiplex_socket([f"{symbol.lower()}@kline_1s"])
 
     async with multi_socket as ms:
         with get_db_session() as sess:
@@ -120,7 +122,6 @@ async def start_to_trade(symbol: str,
                     # side = aabroker.get_trading_side()
                     print('策略產生中.....s')
                     trading_side = abroker.get_trading_side(kwargs=None)
-                    
                     trade_condition_handler.trading_side = trading_side
 
                     print("=======")
@@ -128,20 +129,19 @@ async def start_to_trade(symbol: str,
                     print("=======")
                     if trade_condition_handler.long_condition():
                         
-                        curr_mkt_price = LatestSymbolPrice(client)(symbol)["price"]
-                        usdt_asset = asset_balance(asset="USDT")["free"]
+                        curr_mkt_price = LatestSymbolPrice(client)(symbol)
+                        usdt_asset = asset_balance(asset="USDT")
                         equity_to_trade = float(usdt_asset) * EQUITY_RATIO_TO_TRADE
                         print(f"USDT remain{usdt_asset}, trade balance {equity_to_trade}")
                         quant = lotsize_validator.get_valid_value(equity_to_trade, curr_mkt_price)
                         
                         print(f'下多單！！ .... 買入 {quant}', )
                         market_order = await abroker.place_long_mkt_order(quantity=quant)
-
-                        trade_condition_handler.position_status = PositionStatus["LONG"].value
+                        print(market_order)
                         send_message(TradeMessage(symbol, 
                                                   "BUY", 
                                                   quant, 
-                                                  asset_balance(asset="USDT")["free"], 
+                                                  asset_balance(asset="USDT"), 
                                                   trade_condition_handler.position_status).receive())
 
                         ave_buy_price = await get_open_position_avgprice(symbol, aclient=aclient)
@@ -150,35 +150,36 @@ async def start_to_trade(symbol: str,
                             stop_loss_price = ave_buy_price * (1-STOP_LOSS_RATE)
                             stop_loss_price = price_validator.get_valid_value(stop_loss_price)
 
-                            sl_trigger_price = ave_buy_price * (1 - STOP_LOSS_TRIGGER_RATE)
+                            sl_trigger_price = ave_buy_price * (1-STOP_LOSS_TRIGGER_RATE)
                             sl_trigger_price = price_validator.get_valid_value(sl_trigger_price)
 
-                            print('下停損市價單', stop_loss_price, sl_trigger_price, f'fQ: {quant}') 
+                            print('停損市價單', f"stop_loss_price{stop_loss_price}", f"sl_trigger_price{sl_trigger_price}",
+                             f'fQ: {quant}', f"最新價格{LatestSymbolPrice(client)(symbol)}") 
                             _ = await abroker.place_stop_loss_order(
                                                         **{
                                                             "side": TradingDirection["SELL"].value,
                                                             "type": OrderType["ORDER_TYPE_STOP_LOSS_LIMIT"].value,
                                                             "time_in_force": TimeInForce["TIME_IN_FORCE_GTC"].value,
                                                             "quantity": quant,
-                                                            "trigger_price": sl_trigger_price,# trigger price
+                                                            "trigger_price": sl_trigger_price,
                                                             "price": stop_loss_price
                                                             }
                                                         )
                             send_message(TradeMessage(symbol, 
                                                       "停損", 
                                                       quant, 
-                                                      asset_balance(asset="USDT")["free"], 
+                                                      asset_balance(asset="USDT"), 
                                                       trade_condition_handler.position_status).receive())
 
                         if trade_condition_handler.take_profit_condition():
-                            # take profit order
+
                             take_profit_price = ave_buy_price * (1+TAKE_PROFIT_RATE)
                             take_profit_price = price_validator.get_valid_value(take_profit_price)
 
                             tp_trigger_price = ave_buy_price * (1+TAKE_PROFIT_TRIGGER_RATE)
                             tp_trigger_price = price_validator.get_valid_value(tp_trigger_price)
-                            print('下停利市價單') 
-                            _ = await abroker.place_order(
+                            
+                            _ = await abroker.place_take_profit_order(
                                                             **{
                                                                 "side": TradingDirection["SELL"].value,
                                                                 "type": OrderType["ORDER_TYPE_TAKE_PROFIT_LIMIT"].value,
@@ -191,7 +192,7 @@ async def start_to_trade(symbol: str,
                             send_message(TradeMessage(symbol, 
                                                       "停利", 
                                                       quant, 
-                                                      asset_balance(asset="USDT")["free"],
+                                                      asset_balance(asset="USDT"),
                                                       trade_condition_handler.position_status).receive())
 
                     if trade_condition_handler.short_condition():
@@ -205,11 +206,10 @@ async def start_to_trade(symbol: str,
                         print(f'下賣單！！ Q:{quant}')
                         market_order = await abroker.place_short_mkt_order(quant)
 
-                        trade_condition_handler.position_status = PositionStatus["EMPTY"].value
                         send_message(TradeMessage(symbol, 
                                                   "賣出", 
                                                   quant, 
-                                                  asset_balance(asset="USDT")["free"],
+                                                  asset_balance(asset="USDT"),
                                                   trade_condition_handler.position_status).receive())
 
                     #TODO: 把market order is None 條件拿掉  不管失敗成功都要記錄
@@ -267,7 +267,7 @@ async def main():
 
     # strategy = AIStrategy(AI_MODEL_PATH, asset=symbol)
     strategy = MockStrategy()
-    trade_condition_handler = LongOnlyTradeConditionHandler()
+    trade_condition_handler = LongOnlyTradeConditionHandler(asset=ASSET)
     tasks = [start_to_trade(SYMBOL, trade_condition_handler, strategy)]
     _ = await asyncio.gather(*tasks)
 
