@@ -13,6 +13,7 @@ from src.api.endpoint.orders import (
     ATakeProfitOrderSender,
     AMarketOrderSender
 )
+from src.common.helper import SaveOrderIDGetter
 
 
 class AsyncBroker:
@@ -117,3 +118,11 @@ class AsyncBroker:
         self.trading_signal = self.strategy.get_signal(**kwargs)
         side = self.SIDE_MAPPING[self.trading_signal]
         return side
+
+    async def remove_stop_loss_and_take_profit_orders(self) -> None:
+
+        save_order_id_getter = SaveOrderIDGetter(aclient=self.aclient, symbol=self.symbol)
+        stop_loss_order_id = await save_order_id_getter.aget_stop_loss_order_id()
+        take_profit_order_id = await save_order_id_getter.aget_take_profit_order_id()
+        canceled_ordier_id = stop_loss_order_id + take_profit_order_id
+        cancelled_info = await self.place_cancel_order(order_ids=canceled_ordier_id)

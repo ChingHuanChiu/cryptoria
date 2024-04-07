@@ -49,7 +49,6 @@ class TradeConditionHandler(ABC):
         # call AssetBalance API
         balance = self.asset_balance_obj(asset=self.asset)
         balance = float(balance)
-        print(88888888, balance, f"USDT:{self.asset_balance_obj(asset='USDT')}")
         if balance == 0:
 
             return PositionStatus["EMPTY"].value

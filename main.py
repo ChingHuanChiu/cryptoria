@@ -44,7 +44,6 @@ from src.common.helper import (
     get_open_position_avgprice,
     convert_to_timestamp,
     initialize_data_queue,
-    SaveOrderIDGetter
 )
 
 from src.config import (
@@ -66,7 +65,7 @@ TESTNET = os.getenv("TESTNET")
 
 #ws stream names : https://binance-docs.github.io/apidocs/spot/en/#trade-streams
 
-async def start_to_trade(symbol: str,
+async def start_to_long_trade(symbol: str,
                          trade_condition_handler: TradeConditionHandler,
                          strategy: StrategyBase):
 
@@ -137,7 +136,6 @@ async def start_to_trade(symbol: str,
                         
                         print(f'下多單！！ .... 買入 {quant}', )
                         market_order = await abroker.place_long_mkt_order(quantity=quant)
-                        print(market_order)
                         send_message(TradeMessage(symbol, 
                                                   "BUY", 
                                                   quant, 
@@ -153,8 +151,6 @@ async def start_to_trade(symbol: str,
                             sl_trigger_price = ave_buy_price * (1-STOP_LOSS_TRIGGER_RATE)
                             sl_trigger_price = price_validator.get_valid_value(sl_trigger_price)
 
-                            print('停損市價單', f"stop_loss_price{stop_loss_price}", f"sl_trigger_price{sl_trigger_price}",
-                             f'fQ: {quant}', f"最新價格{LatestSymbolPrice(client)(symbol)}") 
                             _ = await abroker.place_stop_loss_order(
                                                         **{
                                                             "side": TradingDirection["SELL"].value,
@@ -194,14 +190,11 @@ async def start_to_trade(symbol: str,
                                                       quant, 
                                                       asset_balance(asset="USDT"),
                                                       trade_condition_handler.position_status).receive())
+                    
+                    if trade_condition_handler.trading_side == TradingDirection["SELL"].value:
+                        await abroker.remove_stop_loss_and_take_profit_orders()
 
                     if trade_condition_handler.short_condition():
-
-                        save_order_id_getter = SaveOrderIDGetter(aclient=aclient, symbol=symbol)
-                        stop_loss_order_id = await save_order_id_getter.aget_stop_loss_order_id()
-                        take_profit_order_id = await save_order_id_getter.aget_take_profit_order_id()
-                        canceled_ordier_id = stop_loss_order_id + take_profit_order_id
-                        cancelled_info = await abroker.place_cancel_order(order_ids=canceled_ordier_id)
 
                         print(f'下賣單！！ Q:{quant}')
                         market_order = await abroker.place_short_mkt_order(quant)
@@ -268,7 +261,7 @@ async def main():
     # strategy = AIStrategy(AI_MODEL_PATH, asset=symbol)
     strategy = MockStrategy()
     trade_condition_handler = LongOnlyTradeConditionHandler(asset=ASSET)
-    tasks = [start_to_trade(SYMBOL, trade_condition_handler, strategy)]
+    tasks = [start_to_long_trade(SYMBOL, trade_condition_handler, strategy)]
     _ = await asyncio.gather(*tasks)
 
     # client = ClientGetter.get(API_KEY, API_SECRET, TESTNET)
