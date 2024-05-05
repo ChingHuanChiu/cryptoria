@@ -1,3 +1,6 @@
+#SQL Table
+SQL_TABLENAME = ["inference", "transactionrecord", "asset"]
+
 # model setting
 AI_MODEL_PATH = ""
 

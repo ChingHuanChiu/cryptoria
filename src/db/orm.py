@@ -28,8 +28,3 @@ def insert_data(session: Session,
                         Error Message: {str(e)}
                         """)
         session.rollback()
-
-
-        
-
-

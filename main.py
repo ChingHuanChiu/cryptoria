@@ -1,6 +1,7 @@
 """
 TODO:
-1. redesign SQL table 
+1. condiser to add log file
+2. 追蹤停損單並記錄在database (先暫時不考慮下停損單) 
 4. dash to make dashboard  
 # https://www.binance.com/zh-TC/support/faq/%E5%A6%82%E4%BD%95%E5%9C%A8%E5%B9%A3%E5%AE%89%E6%B8%AC%E8%A9%A6%E7%B6%B2%E4%B8%8A%E6%B8%AC%E8%A9%A6%E6%88%91%E7%9A%84%E5%8A%9F%E8%83%BD-ab78f9a1b8824cf0a106b4229c76496d 
 
@@ -31,7 +32,6 @@ from src.common.monitor import WebsocketMonitor
 from src.common.exception import BinanceWebsocketException
 from src.common.enum import (
     TradingDirection, 
-    PositionStatus,
     OrderType,
     TimeInForce,
     TradeMessage
@@ -39,11 +39,12 @@ from src.common.enum import (
 from src.common.data.feature import RNNFeature, TechincalFeature
 from src.common.helper import (
     make_inference_data_to_dict, 
-    adjust_order_info_to_dict,
+    adjust_order_info_to_list_of_dict,
     make_account_info_to_list_of_dict,
     get_open_position_avgprice,
     convert_to_timestamp,
     initialize_data_queue,
+    TradingInitializer
 )
 
 from src.config import (
@@ -94,10 +95,14 @@ async def start_to_long_trade(symbol: str,
     bm = BinanceSocketManager(aclient, user_timeout=60)
     multi_socket = bm.multiplex_socket([f"{symbol.lower()}@kline_1s"])
 
+    #Initial the condition of the trading before starting to trade
+    trade_initialer = TradingInitializer(abroker=abroker)
+    await trade_initialer.initial(asset_balance(ASSET))
+    
     async with multi_socket as ms:
         with get_db_session() as sess:
             while True:
-
+                
                 market_order = None
                 try:
                     print('Trading STARTING....')
@@ -119,7 +124,6 @@ async def start_to_long_trade(symbol: str,
 
                     # rnn_features = RNNFeature(DATAQUEUE).make(tech_features) # shape (window sizes, feature dimension)
                     # side = aabroker.get_trading_side()
-                    print('策略產生中.....s')
                     trading_side = abroker.get_trading_side(kwargs=None)
                     trade_condition_handler.trading_side = trading_side
 
@@ -129,7 +133,7 @@ async def start_to_long_trade(symbol: str,
                     if trade_condition_handler.long_condition():
                         
                         curr_mkt_price = LatestSymbolPrice(client)(symbol)
-                        usdt_asset = asset_balance(asset="USDT")
+                        usdt_asset = asset_balance(asset="USDT")["free"]
                         equity_to_trade = float(usdt_asset) * EQUITY_RATIO_TO_TRADE
                         print(f"USDT remain{usdt_asset}, trade balance {equity_to_trade}")
                         quant = lotsize_validator.get_valid_value(equity_to_trade, curr_mkt_price)
@@ -139,7 +143,7 @@ async def start_to_long_trade(symbol: str,
                         send_message(TradeMessage(symbol, 
                                                   "BUY", 
                                                   quant, 
-                                                  asset_balance(asset="USDT"), 
+                                                  asset_balance(asset="USDT")["free"], 
                                                   trade_condition_handler.position_status).receive())
 
                         ave_buy_price = await get_open_position_avgprice(symbol, aclient=aclient)
@@ -150,8 +154,7 @@ async def start_to_long_trade(symbol: str,
 
                             sl_trigger_price = ave_buy_price * (1-STOP_LOSS_TRIGGER_RATE)
                             sl_trigger_price = price_validator.get_valid_value(sl_trigger_price)
-
-                            _ = await abroker.place_stop_loss_order(
+                            sl_order = await abroker.place_stop_loss_order(
                                                         **{
                                                             "side": TradingDirection["SELL"].value,
                                                             "type": OrderType["ORDER_TYPE_STOP_LOSS_LIMIT"].value,
@@ -162,9 +165,9 @@ async def start_to_long_trade(symbol: str,
                                                             }
                                                         )
                             send_message(TradeMessage(symbol, 
-                                                      "停損", 
+                                                      "掛停損單", 
                                                       quant, 
-                                                      asset_balance(asset="USDT"), 
+                                                      asset_balance(asset="USDT")["free"], 
                                                       trade_condition_handler.position_status).receive())
 
                         if trade_condition_handler.take_profit_condition():
@@ -186,9 +189,9 @@ async def start_to_long_trade(symbol: str,
                                                                 }
                                                             )
                             send_message(TradeMessage(symbol, 
-                                                      "停利", 
+                                                      "掛停利單", 
                                                       quant, 
-                                                      asset_balance(asset="USDT"),
+                                                      asset_balance(asset="USDT")["free"],
                                                       trade_condition_handler.position_status).receive())
                     
                     if trade_condition_handler.trading_side == TradingDirection["SELL"].value:
@@ -202,27 +205,26 @@ async def start_to_long_trade(symbol: str,
                         send_message(TradeMessage(symbol, 
                                                   "賣出", 
                                                   quant, 
-                                                  asset_balance(asset="USDT"),
+                                                  asset_balance(asset="USDT")["free"],
                                                   trade_condition_handler.position_status).receive())
 
-                    #TODO: 把market order is None 條件拿掉  不管失敗成功都要記錄
-                    # if market_order is not None:
-                    #     insert_data(session=sess,
-                    #                 table=TransactionRecord,
-                    #                 list_dict_data=[adjust_order_info_to_dict(market_order)])
+                    if market_order is not None:
+                        insert_data(session=sess,
+                                    table=TransactionRecord,
+                                    list_dict_data=adjust_order_info_to_list_of_dict(market_order))
                         
                     inference_data = make_inference_data_to_dict(timestamp=event_time,
                                                                 symbol=symbol,
                                                                 prediction=str(trading_side),
                                                                 model_version="0.0")
-                    # insert_data(session=sess,
-                    #             table=Inference,
-                    #             list_dict_data=[inference_data])
+                    insert_data(session=sess,
+                                table=Inference,
+                                list_dict_data=[inference_data])
                     
-                    # insert_data(
-                    #     session=sess,
-                    #     table=Asset,
-                    #     list_dict_data=make_account_info_to_list_of_dict(account_info()))
+                    insert_data(
+                        session=sess,
+                        table=Asset,
+                        list_dict_data=make_account_info_to_list_of_dict(account_info()))
                     print('休息')
                     time.sleep(10)
 

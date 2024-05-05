@@ -60,11 +60,9 @@ class AssetBalance(AccountBase):
 
             The API response is the following outcome:
                 {'asset': 'DOGE', 'free': 'XXXXX', 'locked': '0.00000000'}
-            And we return the key of "free":
-                'XXXXX' 
         """
 
-        return self.client.get_asset_balance(asset=asset)["free"]
+        return self.client.get_asset_balance(asset=asset)
     
 
 class AccountStatus(AccountBase):

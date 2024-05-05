@@ -275,7 +275,8 @@ class AStopLossOrderSender(AsyncOrderBase):
                                                   timeInForce=timeInForce,
                                                   quantity=quantity,
                                                   stopPrice=stopPrice,
-                                                  price=price)
+                                                  price=price,
+                                                  newOrderRespType="FULL")
 
 
 class ATakeProfitOrderSender(AStopLossOrderSender):

@@ -8,7 +8,7 @@ from binance.client import AsyncClient
 import pandas as pd
 
 from src.api.endpoint.market_data import AsyncKline
-from src.api.endpoint.account import ATradesGetter
+from src.api.endpoint.account import ATradesGetter, AssetBalance
 from src.common.data.feature import TechincalFeature
 from src.config import FEATURE_COLUMNS
 from src.api.endpoint.orders import AOpenOrdersGetter
@@ -18,35 +18,45 @@ def convert_to_timestamp(timestamp_milliseconds: int) -> datetime:
 
     timestamp_seconds = timestamp_milliseconds / 1000
     dt_object = datetime.fromtimestamp(timestamp_seconds)
-    return dt_object    
+    return dt_object
 
 
-def adjust_order_info_to_dict(order: Dict[str, Any]):
+def adjust_order_info_to_list_of_dict(order: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Adjust the order information to match the schema of the SQL table.
 
     Args:
         order (Dict[str, Any]): The order information.
 
     Returns:
-        Dict[str, Any]: The adjusted order information.
+        List[Dict[str, Any]]: A list of  adjusted order information.
     
     """
+    filled_orders_metadata = order["fills"]
+
     del order["clientOrderId"]
-    del order["orderId"]
     del order["orderListId"]
     del order["workingTime"]
     del order["fills"]
     del order["selfTradePreventionMode"]
-    update_data = {
-        "transacttime": convert_to_timestamp(order.pop("transactTime")),
-        "price": float(order["price"]),
-        "origqty": float(order.pop("origQty")),
-        "executedqty": float(order.pop("executedQty")),
-        "cummulativequoteqty": float(order.pop("cummulativeQuoteQty")),
-        "timeinforce": order.pop("timeInForce")
-    }
-    order.update(update_data)
-    return order
+    
+    res_list = []
+    for filled_order_metadata in filled_orders_metadata:
+        filled_order = order.copy()
+        update_data = {
+            "transactTime": convert_to_timestamp(order["transactTime"]),
+            "origQty": float(order["origQty"]),
+            "executedQty": float(order["executedQty"]),
+            "cummulativeQuoteQty": float(order["cummulativeQuoteQty"]),
+            "timeInForce": order["timeInForce"],
+            "price": float(filled_order_metadata["price"]),
+            "qty": float(filled_order_metadata["qty"]),
+            "commission": float(filled_order_metadata["commission"]),
+            "commissionAsset": filled_order_metadata["commissionAsset"]
+        }
+        filled_order.update(update_data)
+
+        res_list.append(filled_order)
+    return res_list
 
 
 def make_inference_data_to_dict(timestamp,
@@ -143,3 +153,22 @@ class SaveOrderIDGetter:
                                                 if order["type"] == "TAKE_PROFIT_LIMIT"]
 
         return take_profit_order_id
+
+
+class TradingInitializer:
+
+    def __init__(self, abroker) -> None:
+        self.abroker = abroker
+
+    async def initial(self, asset_balance: Dict[str, str]):
+        """The following initial subject:
+        1. Remove the 'stop_loss' and 'take_profit' orders 
+           when the beginning of the trading.
+        2. Clean the blance at the beginng of the trading.
+        """
+        asset_balance = float(asset_balance["free"])
+        quantity = asset_balance
+        
+        await self.abroker.remove_stop_loss_and_take_profit_orders()
+        if quantity != 0:
+            await self.abroker.place_short_mkt_order(quantity)

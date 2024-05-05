@@ -45,15 +45,17 @@ class TradeConditionHandler(ABC):
 
     @property
     def position_status(self) -> PositionStatus:
-        #TODO: check what will the asset_balance is if in the short position
-        # call AssetBalance API
+
         balance = self.asset_balance_obj(asset=self.asset)
-        balance = float(balance)
-        if balance == 0:
+        print(balance)
+        free_balance = float(balance["free"])
+        locked_balance = float(balance["locked"])
+        total_balance = free_balance + locked_balance
+        if total_balance == 0:
 
             return PositionStatus["EMPTY"].value
 
-        elif balance > 0:
+        elif total_balance > 0:
 
             return PositionStatus["LONG"].value
     
@@ -112,7 +114,7 @@ class LongOnlyTradeConditionHandler(TradeConditionHandler):
 
     def stop_loss_condition(self) -> bool:
         
-        return self.position_status == PositionStatus["LONG"].value
+        return False
 
     def take_profit_condition(self) -> bool:
         return False
