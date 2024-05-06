@@ -47,10 +47,10 @@ class TradeConditionHandler(ABC):
     def position_status(self) -> PositionStatus:
 
         balance = self.asset_balance_obj(asset=self.asset)
-        print(balance)
         free_balance = float(balance["free"])
         locked_balance = float(balance["locked"])
         total_balance = free_balance + locked_balance
+        
         if total_balance == 0:
 
             return PositionStatus["EMPTY"].value

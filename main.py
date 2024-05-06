@@ -43,7 +43,6 @@ from src.common.helper import (
     make_account_info_to_list_of_dict,
     get_open_position_avgprice,
     convert_to_timestamp,
-    initialize_data_queue,
     TradingInitializer
 )
 
@@ -78,29 +77,33 @@ async def start_to_long_trade(symbol: str,
                              api_secret=API_SECRET,
                              testnet=TESTNET)
 
-    DATAQUEUE: List[List[Any]] = await initialize_data_queue(aclient=aclient, symbol=symbol)
-
     abroker = AsyncBroker(aclient=aclient, strategy=strategy, symbol=symbol)
     
+    #API objects
     symbol_info = SymbolInfo(client)(symbol)
-
-    lotsize_validator = LotSize(symbol_info)
-    price_validator = Price(symbol_info)
-
     account_info = AccountInfo(client)
     asset_balance = AssetBalance(client)
 
     trade_condition_handler.asset_balance_obj = asset_balance
 
+    #Price validation objects
+    lotsize_validator = LotSize(symbol_info)
+    price_validator = Price(symbol_info)
+
     bm = BinanceSocketManager(aclient, user_timeout=60)
     multi_socket = bm.multiplex_socket([f"{symbol.lower()}@kline_1s"])
 
-    #Initial the condition of the trading before starting to trade
-    trade_initialer = TradingInitializer(abroker=abroker)
-    await trade_initialer.initial(asset_balance(ASSET))
+    trade_initializer = TradingInitializer(abroker=abroker, aclient=aclient)
+    await trade_initializer.initial(asset_balance(ASSET))
+    DATAQUEUE = await trade_initializer.initialize_data_queue(symbol=symbol)
     
     async with multi_socket as ms:
         with get_db_session() as sess:
+            if trade_initializer.clean_position_order is not None:
+                send_message("開始交易前清空部位")
+                insert_data(session=sess,
+                            table=TransactionRecord,
+                            list_dict_data=adjust_order_info_to_list_of_dict(trade_initializer.clean_position_order))
             while True:
                 
                 market_order = None
@@ -135,7 +138,6 @@ async def start_to_long_trade(symbol: str,
                         curr_mkt_price = LatestSymbolPrice(client)(symbol)
                         usdt_asset = asset_balance(asset="USDT")["free"]
                         equity_to_trade = float(usdt_asset) * EQUITY_RATIO_TO_TRADE
-                        print(f"USDT remain{usdt_asset}, trade balance {equity_to_trade}")
                         quant = lotsize_validator.get_valid_value(equity_to_trade, curr_mkt_price)
                         
                         print(f'下多單！！ .... 買入 {quant}', )

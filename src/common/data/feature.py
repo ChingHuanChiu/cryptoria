@@ -61,7 +61,7 @@ class TechincalFeature(FeatureBase):
     
     @staticmethod
     def make_all_indicator_from_ta(df) -> None:
-        """make the indicator data with pandas_ta , which is inplace operation
+        """Make the indicator data with pandas_ta , which is inplace operation
         """
 
         AllStrategy = ta.Strategy(

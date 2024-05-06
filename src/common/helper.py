@@ -12,6 +12,7 @@ from src.api.endpoint.account import ATradesGetter, AssetBalance
 from src.common.data.feature import TechincalFeature
 from src.config import FEATURE_COLUMNS
 from src.api.endpoint.orders import AOpenOrdersGetter
+from src.db.orm import insert_data
 
 
 def convert_to_timestamp(timestamp_milliseconds: int) -> datetime:
@@ -104,27 +105,6 @@ async def get_open_position_avgprice(symbol: str, aclient):
     return average_price
 
 
-async def initialize_data_queue(aclient, symbol) -> List[List[Any]]:
-        """initialize the data queue 
-        """
-        
-        ak = AsyncKline(aclient)
-        data = await ak(symbol=symbol, interval=KLINE_INTERVAL_15MINUTE)
-        # get the latest 100 k bars
-        data = data[-100: ]
-        tmp_df = pd.DataFrame(data)[[0, 1, 2, 3, 4, 5]]
-        tmp_df.columns = FEATURE_COLUMNS[: 6]
-        tmp_df[FEATURE_COLUMNS[0]] = tmp_df[FEATURE_COLUMNS[0]].apply(lambda x: convert_to_timestamp(x))
-
-        tmp_df.set_index(FEATURE_COLUMNS[0], inplace=True)
-        tmp_df = tmp_df.astype(dict(zip(FEATURE_COLUMNS[1: 6], ['float32']*5)))
-        TechincalFeature.make_all_indicator_from_ta(tmp_df)
-        res_df = tmp_df
-        res_df[FEATURE_COLUMNS[0]] = res_df.index
-
-        return res_df[FEATURE_COLUMNS].values.tolist()
-
-
 class SaveOrderIDGetter:
 
     def __init__(self, aclient: AsyncClient, symbol: str) -> None:
@@ -157,8 +137,11 @@ class SaveOrderIDGetter:
 
 class TradingInitializer:
 
-    def __init__(self, abroker) -> None:
+    def __init__(self, abroker, aclient) -> None:
         self.abroker = abroker
+        self.aclient = aclient
+
+        self.__clean_position_order = None
 
     async def initial(self, asset_balance: Dict[str, str]):
         """The following initial subject:
@@ -171,4 +154,29 @@ class TradingInitializer:
         
         await self.abroker.remove_stop_loss_and_take_profit_orders()
         if quantity != 0:
-            await self.abroker.place_short_mkt_order(quantity)
+            self.__clean_position_order = await self.abroker.place_short_mkt_order(quantity)
+
+    async def initialize_data_queue(self, symbol) -> List[List[Any]]:
+        """initialize the data queue 
+        """
+        
+        ak = AsyncKline(self.aclient)
+        data = await ak(symbol=symbol, interval=KLINE_INTERVAL_15MINUTE)
+        # get the latest 100 k bars
+        data = data[-100: ]
+        tmp_df = pd.DataFrame(data)[[0, 1, 2, 3, 4, 5]]
+        tmp_df.columns = FEATURE_COLUMNS[: 6]
+        tmp_df[FEATURE_COLUMNS[0]] = tmp_df[FEATURE_COLUMNS[0]].apply(lambda x: convert_to_timestamp(x))
+
+        tmp_df.set_index(FEATURE_COLUMNS[0], inplace=True)
+        tmp_df = tmp_df.astype(dict(zip(FEATURE_COLUMNS[1: 6], ['float32']*5)))
+        TechincalFeature.make_all_indicator_from_ta(tmp_df)
+        res_df = tmp_df
+        res_df[FEATURE_COLUMNS[0]] = res_df.index
+
+        return res_df[FEATURE_COLUMNS].values.tolist()
+
+    @property
+    def clean_position_order(self):
+
+        return self.__clean_position_order
