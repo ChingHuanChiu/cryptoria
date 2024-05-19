@@ -69,14 +69,7 @@ class KLineInterval(Enum):
     KLINE_INTERVAL_3DAY = '3d'
     KLINE_INTERVAL_1WEEK = '1w'
     KLINE_INTERVAL_1MONTH = '1M'
-
-
-@unique
-class HistoricalKlinesType(Enum):
-    SPOT = 1
-    FUTURES = 2
-    FUTURES_COIN = 3
-
+    
 
 @dataclass
 class TradeMessage:

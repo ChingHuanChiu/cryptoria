@@ -1,9 +1,11 @@
 from typing import Literal, Optional, Union, Generator, List, Any, Dict
 
 from binance.client import AsyncClient, Client
+from binance.enums import HistoricalKlinesType
+
 
 from src.api.base import APIBase, AsyncAPIBase
-from src.common.enum import KLineInterval, HistoricalKlinesType
+from src.common.enum import KLineInterval
 
 
 class MarketDataBase(APIBase):
